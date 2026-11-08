@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gridiron Target Smash - Power Charge Edition</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow-y: auto;
+            overflow-x: hidden;
+            user-select: none;
+            padding: 20px 0;
+            box-sizing: border-box;
+        }
+        #summaryBox {
+            background: rgba(0, 0, 0, 0.6);
+            border-left: 4px solid #ff9100;
+            padding: 15px 20px;
+            max-width: 600px;
+            width: 90%;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            box-sizing: border-box;
+        }
+        #summaryBox h2 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            color: #ffd600;
+            letter-spacing: 0.5px;
+        }
+        #summaryBox p {
+            margin: 0;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #e0e0e0;
+        }
+        #gameContainer {
+            position: relative;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+            width: 600px;
+            height: 600px;
+        }
+        canvas {
+            background-color: #388e3c;
+            display: block;
+            border: 4px solid #fff;
+            border-radius: 4px;
+            cursor: default;
+        }
+        #hudBar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px 15px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+            letter-spacing: 1px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #hudBar span {
+            color: #ff9100;
+        }
+        .hud-group {
+            display: flex;
+            gap: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="summaryBox">
+        <h2>🏈 Quick Game Summary & Controls</h2>
+        <p>Welcome to Gridiron Target Smash! Click the <strong>START GAME</strong> button inside the green field below to begin. Hold down click to charge your power meter, aim, and release to fire. Avoid the solid dark <strong>RED</strong> target—hitting it resets the entire game!</p>
+    </div>
+
+    <div id="gameContainer">
+        <canvas id="footballCanvas" width="600" height="600"></canvas>
+        
+        <div id="hudBar">
+            <div class="hud-group">
+                <div>SCORE: <span id="scoreDisplay">0</span></div>
+                <div>HI-SCORE: <span id="highScoreDisplay">0</span></div>
+                <div>WAVE: <span id="waveDisplay">1</span></div>
+            </div>
+            <div class="hud-group">
+                <div>THROWS: <span id="throwsDisplay">0</span></div>
+                <div>ACCURACY: <span id="accuracyDisplay">100%</span></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById("footballCanvas");
+    const ctx = canvas.getContext("2d");
+    const scoreDisplay = document.getElementById("scoreDisplay");
+    const highScoreDisplay = document.getElementById("highScoreDisplay");
+    const waveDisplay = document.getElementById("waveDisplay");
+    const throwsDisplay = document.getElementById("throwsDisplay");
+    const accuracyDisplay = document.getElementById("accuracyDisplay");
+
+    let gameState = 'START_SCREEN';
+
+    const btnX = 200;
+    const btnY = 320;
+    const btnWidth = 200;
+    const btnHeight = 50;
+
+    let score = 0;
+    let wave = 1;
+    let totalThrows = 0;
+    let successfulHits = 0;
+
+    let highScore = 0;
+    try {
+        if (window.localStorage && localStorage.getItem("footballHighScore")) {
+            highScore = parseInt(localStorage.getItem("footballHighScore")) || 0;
+        }
+    } catch(e) {
+        highScore = 0; 
+    }
+    highScoreDisplay.innerText = highScore;
+
+    let qb = { x: 300, y: 530, size: 15 };
+    let ball = { x: 0, y: 0, rx: 9, ry: 6, vx: 0, vy: 0, active: false };
+    let targets = [];
+    
+    let mousePos = { x: 300, y: 300 };
+    let isCharging = false;
+    let throwPower = 0;
+    let chargeDirection = 1;
+
+    function getMouseCoordinates(e) {
+        const bounds = canvas.getBoundingClientRect();
+        return {
+            x: (e.clientX - bounds.left) * (canvas.width / bounds.width),
+            y: (e.clientY - bounds.top) * (canvas.height / bounds.height)
+        };
+    }
+
+    canvas.addEventListener("mousemove", e => {
+        const currentCoords = getMouseCoordinates(e);
+        mousePos.x = currentCoords.x;
+        mousePos.y = currentCoords.y;
+
+        if (gameState === 'START_SCREEN') {
+            if (mousePos.x >= btnX && mousePos.x <= btnX + btnWidth &&
+                mousePos.y >= btnY && mousePos.y <= btnY + btnHeight) {
+                canvas.style.cursor = "pointer";
+            } else {
+                canvas.style.cursor = "default";
+            }
+        } else {
+            canvas.style.cursor = "crosshair";
+        }
+    });
+
+    canvas.addEventListener("mousedown", e => {
+        const currentCoords = getMouseCoordinates(e);
+        mousePos.x = currentCoords.x;
+        mousePos.y = currentCoords.y;
+
+        if (gameState === 'START_SCREEN') {
+            if (mousePos.x >= btnX && mousePos.x <= btnX + btnWidth &&
+                mousePos.y >= btnY && mousePos.y <= btnY + btnHeight) {
+                gameState = 'PLAYING';
+                resetGame();
+            }
+        } else if (gameState === 'PLAYING' && !ball.active) {
+            isCharging = true;
+            throwPower = 0;
+            chargeDirection = 1;
+        }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+        if (gameState === 'PLAYING' && isCharging) {
+            isCharging = false;
+            if (!ball.active) {
+                fireFootball();
+            }
+        }
+    });
+
+    function resetGame() {
+        score = 0;
+        wave = 1;
+        totalThrows = 0;
+        successfulHits = 0;
+        scoreDisplay.innerText = score;
+        waveDisplay.innerText = wave;
+        throwsDisplay.innerText = totalThrows;
+        updateAccuracy();
+        spawnTargets();
+    }
+
+    function spawnTargets() {
+        targets = [];
+        let targetCount = 3 + Math.min(wave, 4); 
+        let baseSpeed = 1.5 + (wave * 0.4); 
+        
+        let specialIndex = 0;
+        let dangerIndex = 1;
+
+        for (let i = 0; i < targetCount; i++) {
+            let isSpecialTarget = (i === specialIndex);
+            let isDangerTarget = (i === dangerIndex);
+            
+            let speedMultiplier = isSpecialTarget ? 1.2 : (isDangerTarget ? 1.4 : 1.0);
+            let targetSpeed = baseSpeed * speedMultiplier;
+
+            targets.push({
+                x: 80 + i * (440 / (targetCount - 1 || 1)),
+                y: 100 + (i % 2) * 40, 
+                size: 18,
+                speedX: targetSpeed * (i % 2 === 0 ? 1 : -1),
+                isSpecial: isSpecialTarget,
+                isDanger: isDangerTarget
+            });
+        }
+    }
+
+    function fireFootball() {
+        ball.active = true;
+        ball.x = qb.x;
+        ball.y = qb.y;
+
+        totalThrows++;
+        throwsDisplay.innerText = totalThrows;
+        updateAccuracy();
+
+        const dist = Math.hypot(mousePos.x - ball.x, mousePos.y - ball.y);
+        const calculatedSpeed = 4 + (throwPower / 100) * 16; 
+
+        ball.vx = ((mousePos.x - ball.x) / (dist || 1)) * calculatedSpeed;
+        ball.vy = ((mousePos.y - ball.y) / (dist || 1)) * calculatedSpeed;
+    }
+
+    function updateAccuracy() {
+        if (totalThrows === 0) {
+            accuracyDisplay.innerText = "100%";
+        } else {
+            let percentage = Math.round((successfulHits / totalThrows) * 100);
+            accuracyDisplay.innerText = percentage + "%";
+        }
+    }
+
+    function update() {
+        if (gameState !== 'PLAYING') return;
+
+        if (isCharging) {
+            throwPower += 2.5 * chargeDirection;
+            if (throwPower >= 100) {
+                throwPower = 100;
+                chargeDirection = -1; 
+            } else if (throwPower <= 0) {
+                throwPower = 0;
+                chargeDirection = 1;
+            }
+        }
+
+        targets.forEach(tar => {
+            tar.x += tar.speedX;
+            if (tar.x <= tar.size || tar.x >= canvas.width - tar.size) tar.speedX *= -1; 
+        });
+
+        if (ball.active) {
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            if (ball.y < 0 || ball.x < 0 || ball.x > canvas.width || ball.y > canvas.height) {
+                ball.active = false;
+            }
+
+            if (ball.active) {
+                for (let i = targets.length - 1; i >= 0; i--) {
+                    let tar = targets[i];
+                    if (Math.hypot(tar.x - ball.x, tar.y - ball.y) < (tar.size + ball.rx)) {
+                        
+                        if (tar.isDanger) {
+                            ball.active = false;
+                            isCharging = false;
+                            gameState = 'START_SCREEN';
+                            return; 
+                        }
+
+                        successfulHits++;
+                        if (tar.isSpecial) {
+                            score += 20; 
+                        } else {
+                            score += 10; 
+                        }
+                        
+                        targets.splice(i, 1);
+                        ball.active = false;
+                        scoreDisplay.innerText = score;
+
+                        if (score > highScore) {
+                            highScore = score;
+                            highScoreDisplay.innerText = highScore;
+                            try {
+                                localStorage.setItem("footballHighScore", highScore);
+                            } catch(e) {}
+                        }
+
+                        updateAccuracy();
+                        break; 
+                    }
+                }
+            }
+        }
+
+        let activeScoreTargets = targets.filter(t => !t.isDanger);
+        if (activeScoreTargets.length === 0) {
+            wave++;
+            waveDisplay.innerText = wave;
+            ball.active = false;
+            spawnTargets();
+        }
+    }
+
+    function drawField() {
+        ctx.strokeStyle = "rgba(255,255,255,0.15)";
+        ctx.lineWidth = 2;
+        for (let i = 60; i < canvas.height; i += 60) {
+            ctx.beginPath();
+            ctx.moveTo(0, i);
+            ctx.lineTo(canvas.width, i);
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = "#1b5e20";
+        ctx.fillRect(0, 0, canvas.width, 60);
+        ctx.fillStyle = "#ffd600";
+        ctx.fillRect(0, 57, canvas.width, 3); 
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawField();
+
+        if (gameState === 'START_SCREEN') {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+            ctx.font = "bold 36px 'Segoe UI', sans-serif";
+            ctx.textAlign = "center";
+            ctx.fillText("GRIDIRON TARGET SMASH", canvas.width / 2 + 3, 203);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText("GRIDIRON TARGET SMASH", canvas.width / 2, 200);
+
+            ctx.fillStyle = "#ffd600";
+            ctx.font = "italic 16px 'Segoe UI', sans-serif";
+            ctx.fillText("Power Charge Edition", canvas.width / 2, 235);
+
+            ctx.fillStyle = "#ff9100";
+            ctx.beginPath();
+            ctx.rect(btnX, btnY, btnWidth, btnHeight);
+            ctx.fill();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "#ffffff";
+            ctx.stroke();
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 20px 'Segoe UI', sans-serif";
+            ctx.textBaseline = "middle";
+            ctx.fillText("START GAME", canvas.width / 2, btnY + btnHeight / 2);
+            ctx.textBaseline = "alphabetic"; 
+
+          } else if (gameState === 'PLAYING') {
+              if (isCharging || !ball.active) {
+                  ctx.beginPath();
+                  ctx.moveTo(qb.x, qb.y);
+                  ctx.lineTo(mousePos.x, mousePos.y);
+                  ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+                  ctx.lineWidth = 2;
+                  ctx.stroke();
+              }
+
+              if (isCharging) {
+                  const meterWidth = 80;
+                  const meterHeight = 12;
+                  const mx = qb.x - meterWidth / 2;
+                  const my = qb.y + qb.size + 15;
+
+                  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+                  ctx.fillRect(mx, my, meterWidth, meterHeight);
+
+                  let hue = (120 - (throwPower * 1.2)); 
+                  ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+                  ctx.fillRect(mx, my, (throwPower / 100) * meterWidth, meterHeight);
+
+                  ctx.strokeStyle = "#ffffff";
+                  ctx.lineWidth = 1.5;
+                  ctx.strokeRect(mx, my, meterWidth, meterHeight);
+              }
+
+              targets.forEach(tar => {
+                  ctx.beginPath();
+                  ctx.arc(tar.x, tar.y, tar.size, 0, Math.PI * 2);
+                  
+                  if (tar.isDanger) {
+                      ctx.fillStyle = "#b71c1c"; 
+                  } else {
+                      ctx.fillStyle = tar.isSpecial ? "#ffd600" : "#d32f2f";
+                  }
+                  ctx.fill();
+                  ctx.lineWidth = 3;
+                  ctx.strokeStyle = "#ffffff";
+                  ctx.stroke();
+
+                  ctx.beginPath();
+                  ctx.arc(tar.x, tar.y, tar.size * 0.5, 0, Math.PI * 2);
+                  
+                  if (tar.isDanger) {
+                      ctx.fillStyle = "#ffffff"; 
+                  } else {
+                      ctx.fillStyle = tar.isSpecial ? "#1a1a1a" : "#ffffff";
+                  }
+                  ctx.fill();
+                  
+                  if (tar.isDanger) {
+                      ctx.strokeStyle = "#b71c1c";
+                      ctx.lineWidth = 2;
+                      ctx.beginPath();
+                      ctx.moveTo(tar.x - 4, tar.y - 4);
+                      ctx.lineTo(tar.x + 4, tar.y + 4);
+                      ctx.moveTo(tar.x + 4, tar.y - 4);
+                      ctx.lineTo(tar.x - 4, tar.y + 4);
+                      ctx.stroke();
+                  }
+              });
+
+              ctx.beginPath();
+              ctx.arc(qb.x, qb.y, qb.size, 0, Math.PI * 2);
+              ctx.fillStyle = "#1565c0"; 
+              ctx.fill();
+              ctx.lineWidth = 3;
+              ctx.strokeStyle = "#ffffff";
+              ctx.stroke();
+
+              if (ball.active) {
+                  ctx.save();
+                  ctx.translate(ball.x, ball.y);
+                  
+                  let angle = Math.atan2(ball.vy, ball.vx);
+                  ctx.rotate(angle);
+
+                  ctx.beginPath();
+                  ctx.ellipse(0, 0, ball.rx, ball.ry, 0, 0, Math.PI * 2);
+                  ctx.fillStyle = "#8d6e63"; 
+                  ctx.fill();
+                  ctx.lineWidth = 1.5;
+                  ctx.strokeStyle = "#5d4037";
+                  ctx.stroke();
+
+                  ctx.strokeStyle = "#ffffff";
+                  ctx.lineWidth = 1.5;
+                  ctx.beginPath();
+                  ctx.moveTo(-ball.rx + 5, 0);
+                  ctx.lineTo(ball.rx - 5, 0);
+                  ctx.stroke();
+
+                  for (let i = -3; i <= 3; i += 2.5) {
+                      ctx.beginPath();
+                      ctx.moveTo(i, -2);
+                      ctx.lineTo(i, 2);
+                      ctx.stroke();
+                  }
+
+                  ctx.restore();
+              }
+          }
+      }
+
+      function gameLoop() {
+          update();
+          draw();
+          requestAnimationFrame(gameLoop);
+      }
+
+      gameLoop();
+  </script>
+  </body>
+  </html>
